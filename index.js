@@ -1,15 +1,11 @@
-
-
 const express = require("express");
 const axios = require("axios");
 const { Telegraf, Markup, session } = require("telegraf");
 
-const {
-    BOT_TOKEN = "8859133558:AAHQYxh_-ybGhrKTLSsHtM8tgfJVv67FEx8",
-    API_URL = "https://axnumberserver.shop/number/api",
-    API_KEY,
-    PORT = 3000
-} = process.env;
+const BOT_TOKEN = "8859133558:AAEfN1MvkIIcdAHeNFii2rsa7GOk60LvmbY";
+const API_URL = "https://axnumberserver.shop/number/api";
+const API_KEY = "3fc9716c1eccdd7cf02bdc83f8e23b974b0bf475";
+const PORT = 3000;
 
 if (!BOT_TOKEN || !API_KEY) {
     throw new Error("Missing BOT_TOKEN or API_KEY environment variable.");
