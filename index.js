@@ -5,11 +5,10 @@ const express = require('express');
 const API_BASE = "https://axnumberserver.shop/number/api";
 const API_KEY = "3fc9716c1eccdd7cf02bdc83f8e23b974b0bf475";
 
-// Bot Token from environment variable or fallback string
 const BOT_TOKEN = process.env.BOT_TOKEN || "8859133558:AAHQYxh_-ybGhrKTLSsHtM8tgfJVv67FEx8";
 const bot = new Telegraf(BOT_TOKEN);
 
-// Helper function for API requests using native Node.js fetch
+// Helper function for API requests
 async function apiRequest(params) {
     let url = `${API_BASE}?key=${API_KEY}`;
     for (const [k, v] of Object.entries(params)) {
@@ -37,7 +36,7 @@ const mainMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('📨 Latest Public SMS', 'menu_free_sms')]
 ]);
 
-// /start command & Main Menu handler
+// Bot Handlers
 bot.start(async (ctx) => {
     await ctx.reply("🤖 <b>Welcome to the Reseller Number & SMS Bot!</b>\n\nSelect an option below:", {
         parse_mode: 'HTML',
@@ -52,7 +51,6 @@ bot.action('main_menu', async (ctx) => {
     });
 });
 
-// Menu: Buy Number - Step 1: Countries
 bot.action('menu_buy', async (ctx) => {
     await ctx.editMessageText("⏳ Fetching supported countries...");
     const countries = await apiRequest({ action: 'countries' });
@@ -82,7 +80,6 @@ bot.action('menu_buy', async (ctx) => {
     });
 });
 
-// Menu: Buy Number - Step 2: Services / Products
 bot.action(/^country_(.+)$/, async (ctx) => {
     const country = ctx.match[1];
     await ctx.editMessageText(`⏳ Fetching services for <b>${country.toUpperCase()}</b>...`, { parse_mode: 'HTML' });
@@ -109,7 +106,6 @@ bot.action(/^country_(.+)$/, async (ctx) => {
     });
 });
 
-// Menu: Buy Number - Step 3: Operators
 bot.action(/^product_(.+)_(.+)$/, async (ctx) => {
     const country = ctx.match[1];
     const product = ctx.match[2];
@@ -137,7 +133,6 @@ bot.action(/^product_(.+)_(.+)$/, async (ctx) => {
     });
 });
 
-// Menu: Buy Number - Step 4: Purchase & Polling
 bot.action(/^buy_(.+)_(.+)_(.+)$/, async (ctx) => {
     const country = ctx.match[1];
     const product = ctx.match[2];
@@ -180,11 +175,9 @@ bot.action(/^buy_(.+)_(.+)_(.+)$/, async (ctx) => {
         ])
     });
 
-    // Start background SMS polling task
     pollSmsTask(ctx, ctx.chat.id, ctx.callbackQuery.message.message_id, orderId, phone, country, product);
 });
 
-// Background Polling Task (3s interval, 120s timeout)
 async function pollSmsTask(ctx, chatId, messageId, orderId, phone, country, product) {
     let elapsed = 0;
     const timeout = 120000;
@@ -223,7 +216,6 @@ async function pollSmsTask(ctx, chatId, messageId, orderId, phone, country, prod
         }
     }
 
-    // Timeout reached -> Auto-cancel and refund
     await apiRequest({ action: 'cancel', order_id: orderId });
     const timeoutText = (
         `⏱️ <b>Timeout (120s) Reached - No SMS Received</b>\n\n` +
@@ -240,7 +232,6 @@ async function pollSmsTask(ctx, chatId, messageId, orderId, phone, country, prod
     }
 }
 
-// Manual Cancel Order
 bot.action(/^cancel_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
     await ctx.answerCbQuery("Canceling order...");
@@ -255,7 +246,6 @@ bot.action(/^cancel_(.+)$/, async (ctx) => {
     });
 });
 
-// Manual Finish Order
 bot.action(/^finish_(.+)$/, async (ctx) => {
     const orderId = ctx.match[1];
     await ctx.answerCbQuery("Finishing order...");
@@ -270,7 +260,6 @@ bot.action(/^finish_(.+)$/, async (ctx) => {
     });
 });
 
-// Free Public Temporary Numbers Menu
 bot.action('menu_free_numbers', async (ctx) => {
     await ctx.editMessageText("⏳ Fetching free public temporary numbers...");
     const data = await apiRequest({ action: 'numbers' });
@@ -299,7 +288,6 @@ bot.action('menu_free_numbers', async (ctx) => {
     });
 });
 
-// Free Public Latest SMS/OTP Menu
 bot.action('menu_free_sms', async (ctx) => {
     await ctx.editMessageText("⏳ Fetching latest free public SMS/OTP...");
     const data = await apiRequest({ action: 'sms' });
@@ -328,19 +316,27 @@ bot.action('menu_free_sms', async (ctx) => {
     });
 });
 
-// Express Server setup for Render.com Web Service health checks and port binding
+// Express App & Webhook Integration
 const app = express();
 const PORT = process.env.PORT || 3000;
+const webhookPath = `/telegraf/${BOT_TOKEN}`;
+
+// Handle incoming webhook requests from Telegram
+app.use(bot.webhookCallback(webhookPath));
 
 app.get('/', (req, res) => {
-    res.send('Telegram Bot is active and running!');
+    res.send('Telegram Bot is active and running via Webhooks!');
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`Server listening on port ${PORT}`);
-    bot.launch();
-});
 
-// Enable graceful shutdown
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    // If hosted on Render, automatically set the webhook URL using Render's domain
+    if (process.env.RENDER_EXTERNAL_URL) {
+        const fullWebhookUrl = `${process.env.RENDER_EXTERNAL_URL}${webhookPath}`;
+        await bot.telegram.setWebhook(fullWebhookUrl);
+        console.log(`Webhook successfully set to: ${fullWebhookUrl}`);
+    } else {
+        console.log("RENDER_EXTERNAL_URL not found. Running locally or webhook needs manual setup.");
+    }
+});
