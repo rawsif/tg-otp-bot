@@ -5,7 +5,7 @@ const express = require('express');
 const API_BASE = "https://axnumberserver.shop/number/api";
 const API_KEY = "3fc9716c1eccdd7cf02bdc83f8e23b974b0bf475";
 
-const BOT_TOKEN = process.env.BOT_TOKEN || "8859133558:AAHQYxh_-ybGhrKTLSsHtM8tgfJVv67FEx8";
+const BOT_TOKEN = process.env.BOT_TOKEN || "8859133558:AAEfN1MvkIIcdAHeNFii2rsa7GOk60LvmbY";
 const bot = new Telegraf(BOT_TOKEN);
 
 // Helper function for API requests
