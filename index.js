@@ -1,4 +1,18 @@
 const express = require("express");
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+res.status(200).send("Telegram monitor is running.");
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+console.log("Express server running on port ${PORT}");
+});
+
+
+
+
 
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
@@ -7,21 +21,6 @@ const { Api } = require("telegram");
 const input = require("input");
 const fs = require("fs");
 const crypto = require("crypto");
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => {
-    res.status(200).send("Telegram monitor is running.");
-});
-
-app.get("/health", (req, res) => {
-    res.status(200).json({ status: "alive" });
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Express server running on port ${PORT}`);
-});
 
 const apiId = 38564953;
 const apiHash = "55caa3ce808da805b803bf6661f457b3";
@@ -113,7 +112,7 @@ async function main() {
                 return;
             }
         }
-    }, new NewMessage({ chats: [channel] }));
+}, new NewMessage({ chats: [CHANNEL] }));
 
     console.log(`Monitoring channel: ${CHANNEL}`);
 }
