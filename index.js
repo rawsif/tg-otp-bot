@@ -1,3 +1,5 @@
+const express = require("express");
+
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { NewMessage } = require("telegram/events");
@@ -6,6 +8,21 @@ const input = require("input");
 const fs = require("fs");
 const crypto = require("crypto");
 
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+    res.status(200).send("Telegram monitor is running.");
+});
+
+app.get("/health", (req, res) => {
+    res.status(200).json({ status: "alive" });
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Express server running on port ${PORT}`);
+});
+
 const apiId = 38564953;
 const apiHash = "55caa3ce808da805b803bf6661f457b3";
 
@@ -13,7 +30,7 @@ const CHANNEL = "klyx_news";
 const TARGET_BOT = "klyxx_bot";
 const SESSION_FILE = "telegram-session.txt";
 
-const savedSession = "1BQANOTEuMTA4LjU2LjEyNgG7KDOESQ3XBdQTSCEP8DoKSuL4aNa43T2IlWl7FYtA/V0ztSL3NOo7Ma1g6sro3QYykFst4P6EvfdFlgCd13BhHU415BlghLlbauWU5mkgUSKOnq9562pL41HJnt+Wh1d+6iLM+7+MAcUk9F7Pf91UQ8raTtJyEgj9AIFVdbKkzoNfLBSlIklBglNKfvfUUxhzky8OYo911tfsPuOjoXtKdngQDlTuf21DnO3rmn/vBIFqFlclCqaqLN1ycD6SjOYqCiBFw6GsP7eDBcu799XpPVEWxSi5/NA+dMsgiTanjqouhM1imNQa6TX7N0UcZo0VgzaWVypB52wfh0gAXtcd4A==";
+const savedSession = "YOUR_EXISTING_TELEGRAM_SESSION";
 
 const client = new TelegramClient(
     new StringSession(savedSession),
@@ -96,7 +113,7 @@ async function main() {
                 return;
             }
         }
-}, new NewMessage({ chats: [CHANNEL] }));
+    }, new NewMessage({ chats: [channel] }));
 
     console.log(`Monitoring channel: ${CHANNEL}`);
 }
