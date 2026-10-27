@@ -1,438 +1,106 @@
-const express = require("express");
-const axios = require("axios");
-const { Telegraf, Markup, session } = require("telegraf");
+const { TelegramClient } = require("telegram");
+const { StringSession } = require("telegram/sessions");
+const { NewMessage } = require("telegram/events");
+const { Api } = require("telegram");
+const input = require("input");
+const fs = require("fs");
+const crypto = require("crypto");
 
-const BOT_TOKEN = "8859133558:AAEfN1MvkIIcdAHeNFii2rsa7GOk60LvmbY";
-const API_URL = "https://axnumberserver.shop/number/api";
-const API_KEY = "3fc9716c1eccdd7cf02bdc83f8e23b974b0bf475";
-const PORT = 3000;
+const apiId = 38564953;
+const apiHash = "55caa3ce808da805b803bf6661f457b3";
 
-if (!BOT_TOKEN || !API_KEY) {
-    throw new Error("Missing BOT_TOKEN or API_KEY environment variable.");
-}
+const CHANNEL = "klyx_news";
+const TARGET_BOT = "klyxx_bot";
+const SESSION_FILE = "telegram-session.txt";
 
-// =====================================================
-// EXPRESS SERVER
-// =====================================================
+const savedSession = fs.existsSync(SESSION_FILE)
+    ? fs.readFileSync(SESSION_FILE, "utf8").trim()
+    : "";
 
-const app = express();
+const client = new TelegramClient(
+    new StringSession(savedSession),
+    apiId,
+    apiHash,
+    { connectionRetries: 5 }
+);
 
-app.get("/", (req, res) => {
-    res.status(200).send("Reseller Bot is running.");
-});
-
-app.get("/health", (req, res) => {
-    res.status(200).json({ status: "ok" });
-});
-
-const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Express server listening on port ${PORT}`);
-});
-
-// =====================================================
-// RESELLER API
-// =====================================================
-
-const api = axios.create({
-    baseURL: API_URL,
-    timeout: 15000
-});
-
-async function apiRequest(action, params = {}) {
-    const response = await api.get("", {
-        params: {
-            key: API_KEY,
-            action,
-            ...params
-        }
+async function main() {
+    await client.start({
+        phoneNumber: () => input.text("Phone number: "),
+        phoneCode: () => input.text("Telegram login code: "),
+        password: () => input.text("Two-step verification password: "),
+        onError: console.error,
     });
 
-    const data = response.data;
+    fs.writeFileSync(SESSION_FILE, client.session.save(), {
+        mode: 0o600,
+    });
 
-    if (!data || typeof data !== "object") {
-        throw new Error("Invalid API response.");
-    }
+    console.log("Login successful. Session saved automatically.");
 
-    if (
-        !Array.isArray(data) &&
-        (data.status === "error" || data.success === false)
-    ) {
-        throw new Error(data.message || "API request failed.");
-    }
+    const channel = await client.getEntity(CHANNEL);
+    const processed = new Set();
 
-    return data;
-}
+    client.addEventHandler(async (event) => {
+        const message = event.message;
 
-function normalizeItems(data, wrappers = []) {
-    if (Array.isArray(data)) {
-        return data.map((value, index) => ({
-            key: String(
-                value && typeof value === "object"
-                    ? value.key ?? value.id ?? value.code ?? index
-                    : value
-            ),
-            value
-        }));
-    }
+        if (!message?.buttons) return;
 
-    if (!data || typeof data !== "object") {
-        return [];
-    }
+        const messageKey = `${message.chatId}-${message.id}`;
+        if (processed.has(messageKey)) return;
 
-    for (const wrapper of wrappers) {
-        if (
-            data[wrapper] &&
-            typeof data[wrapper] === "object"
-        ) {
-            return normalizeItems(data[wrapper]);
-        }
-    }
+        for (const row of message.buttons) {
+            for (const button of row) {
+                if (!button.url) continue;
 
-    return Object.entries(data).map(([key, value]) => ({
-        key,
-        value
-    }));
-}
-
-function displayName(key, value) {
-    if (value && typeof value === "object") {
-        return String(value.text_en || value.name || key);
-    }
-
-    return String(key);
-}
-
-function makeKeyboard(items, prefix, labelFunction, backButton) {
-    const rows = [];
-
-    for (const item of items) {
-        const callbackData = `${prefix}:${item.key}`;
-
-        if (Buffer.byteLength(callbackData, "utf8") > 64) {
-            continue;
-        }
-
-        rows.push([
-            Markup.button.callback(
-                String(labelFunction(item)).slice(0, 60),
-                callbackData
-            )
-        ]);
-    }
-
-    if (backButton) {
-        rows.push([
-            Markup.button.callback(
-                backButton.text,
-                backButton.callback
-            )
-        ]);
-    }
-
-    return Markup.inlineKeyboard(rows);
-}
-
-// =====================================================
-// TELEGRAM BOT
-// =====================================================
-
-const bot = new Telegraf(BOT_TOKEN);
-
-bot.use(session());
-
-bot.use(async (ctx, next) => {
-    if (!ctx.session) ctx.session = {};
-    return next();
-});
-
-async function safeEdit(ctx, text, extra = {}) {
-    try {
-        await ctx.editMessageText(text, extra);
-    } catch (error) {
-        if (String(error.message).includes("message is not modified")) {
-            return;
-        }
-
-        if (String(error.message).includes("message can't be edited")) {
-            await ctx.reply(text, extra);
-            return;
-        }
-
-        throw error;
-    }
-}
-
-async function showHome(ctx, edit = false) {
-    const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback("🌍 Countries", "countries")],
-        [Markup.button.callback("📋 Current Selection", "my_session")]
-    ]);
-
-    const text = [
-        "🤖 RESELLER BOT",
-        "",
-        "Browse available countries, services, and operators.",
-        "",
-        "Select an option below."
-    ].join("\n");
-
-    if (edit) {
-        await safeEdit(ctx, text, keyboard);
-    } else {
-        await ctx.reply(text, keyboard);
-    }
-}
-
-bot.start(async (ctx) => {
-    ctx.session = {
-        country: null,
-        product: null
-    };
-
-    await showHome(ctx);
-});
-
-bot.command("menu", async (ctx) => {
-    await showHome(ctx);
-});
-
-// =====================================================
-// COUNTRY MENU
-// =====================================================
-
-bot.action("countries", async (ctx) => {
-    await ctx.answerCbQuery();
-
-    try {
-        const data = await apiRequest("countries");
-
-        const countries = normalizeItems(data, ["data", "countries"]);
-
-        if (!countries.length) {
-            await safeEdit(ctx, "No countries are currently available.");
-            return;
-        }
-
-        const keyboard = makeKeyboard(
-            countries,
-            "country",
-            ({ key, value }) => `🌍 ${displayName(key, value)}`,
-            { text: "⬅️ Main Menu", callback: "home" }
-        );
-
-        await safeEdit(
-            ctx,
-            "🌍 SELECT A COUNTRY\n\nChoose a country:",
-            keyboard
-        );
-    } catch (error) {
-        console.error("Country request failed:", error.message);
-        await safeEdit(
-            ctx,
-            "⚠️ Unable to load countries. Please try again later."
-        );
-    }
-});
-
-// =====================================================
-// SERVICE MENU
-// =====================================================
-
-bot.action(/^country:(.+)$/, async (ctx) => {
-    await ctx.answerCbQuery();
-
-    const country = ctx.match[1];
-
-    ctx.session.country = country;
-    ctx.session.product = null;
-
-    try {
-        const data = await apiRequest("products", { country });
-
-        const products = normalizeItems(data, ["data", "products"]);
-
-        if (!products.length) {
-            await safeEdit(
-                ctx,
-                `No services are currently available for ${country}.`,
-                Markup.inlineKeyboard([
-                    [Markup.button.callback("⬅️ Countries", "countries")]
-                ])
-            );
-            return;
-        }
-
-        const keyboard = makeKeyboard(
-            products,
-            "product",
-            ({ key, value }) => {
-                if (value && typeof value === "object") {
-                    const stock = value.Qty ?? value.qty ?? "?";
-                    return `📦 ${displayName(key, value)} · Stock: ${stock}`;
+                let url;
+                try {
+                    url = new URL(button.url);
+                } catch {
+                    continue;
                 }
 
-                return `📦 ${key}`;
-            },
-            { text: "⬅️ Countries", callback: "countries" }
-        );
+                if (!["t.me", "telegram.me"].includes(url.hostname)) {
+                    continue;
+                }
 
-        await safeEdit(
-            ctx,
-            `🌍 COUNTRY: ${displayName(country, null)}\n\nSelect a service:`,
-            keyboard
-        );
-    } catch (error) {
-        console.error("Product request failed:", error.message);
-        await safeEdit(ctx, "⚠️ Unable to load services. Please try again.");
-    }
-});
+                const parts = url.pathname.split("/").filter(Boolean);
 
-// =====================================================
-// OPERATOR MENU
-// =====================================================
+                if (parts[0]?.toLowerCase() !== TARGET_BOT) continue;
 
-bot.action(/^product:(.+)$/, async (ctx) => {
-    await ctx.answerCbQuery();
+                const startParam = url.searchParams.get("start");
+                if (!startParam) continue;
 
-    const product = ctx.match[1];
-    const country = ctx.session.country;
+                processed.add(messageKey);
 
-    if (!country) {
-        await safeEdit(
-            ctx,
-            "Your session has expired. Send /start to begin again."
-        );
-        return;
-    }
+                try {
+                    const bot = await client.getInputEntity(TARGET_BOT);
 
-    ctx.session.product = product;
+                    await client.invoke(
+                        new Api.messages.StartBot({
+                            bot,
+                            peer: bot,
+                            randomId: BigInt(
+                                "0x" + crypto.randomBytes(8).toString("hex")
+                            ),
+                            startParam,
+                        })
+                    );
 
-    try {
-        const data = await apiRequest("operators", {
-            country,
-            product
-        });
+                    console.log(
+                        `Started @${TARGET_BOT} with parameter: ${startParam}`
+                    );
+                } catch (error) {
+                    processed.delete(messageKey);
+                    console.error("Failed:", error.message);
+                }
 
-        const operators = normalizeItems(data, ["data", "operators"]);
-
-        if (!operators.length) {
-            await safeEdit(
-                ctx,
-                "No operators are currently available.",
-                Markup.inlineKeyboard([
-                    [Markup.button.callback("⬅️ Services", `country:${country}`)],
-                    [Markup.button.callback("🏠 Main Menu", "home")]
-                ])
-            );
-            return;
+                return;
+            }
         }
+    }, new NewMessage({ chats: [channel] }));
 
-        const lines = [
-            "📋 OPERATOR AVAILABILITY",
-            "",
-            `🌍 Country: ${country}`,
-            `📦 Service: ${product}`,
-            ""
-        ];
-
-        for (const { key, value } of operators) {
-            const details =
-                value && typeof value === "object"
-                    ? {
-                        name: displayName(key, value),
-                        price: value.customer_price ?? value.Price ?? "N/A",
-                        stock: value.available_count ?? value.Qty ?? 0
-                    }
-                    : {
-                        name: key,
-                        price: "N/A",
-                        stock: "N/A"
-                    };
-
-            lines.push(
-                `• ${details.name}`,
-                `  Price: ${details.price}`,
-                `  Available: ${details.stock}`,
-                ""
-            );
-        }
-
-        const keyboard = Markup.inlineKeyboard([
-            [Markup.button.callback("⬅️ Services", `country:${country}`)],
-            [Markup.button.callback("🌍 Countries", "countries")],
-            [Markup.button.callback("🏠 Main Menu", "home")]
-        ]);
-
-        await safeEdit(ctx, lines.join("\n").slice(0, 4000), keyboard);
-    } catch (error) {
-        console.error("Operator request failed:", error.message);
-        await safeEdit(ctx, "⚠️ Unable to load operators. Please try again.");
-    }
-});
-
-// =====================================================
-// CURRENT SESSION
-// =====================================================
-
-bot.action("my_session", async (ctx) => {
-    await ctx.answerCbQuery();
-
-    const country = ctx.session.country || "Not selected";
-    const product = ctx.session.product || "Not selected";
-
-    await safeEdit(
-        ctx,
-        [
-            "📋 CURRENT SELECTION",
-            "",
-            `🌍 Country: ${country}`,
-            `📦 Service: ${product}`
-        ].join("\n"),
-        Markup.inlineKeyboard([
-            [Markup.button.callback("🌍 Countries", "countries")],
-            [Markup.button.callback("🏠 Main Menu", "home")]
-        ])
-    );
-});
-
-// =====================================================
-// MAIN MENU NAVIGATION
-// =====================================================
-
-bot.action("home", async (ctx) => {
-    await ctx.answerCbQuery();
-    await showHome(ctx, true);
-});
-
-// =====================================================
-// ERROR HANDLING
-// =====================================================
-
-bot.catch((error, ctx) => {
-    console.error(
-        `Bot error for update ${ctx.update.update_id}:`,
-        error.message
-    );
-});
-
-bot.launch()
-    .then(() => console.log("Telegram bot started successfully."))
-    .catch((error) => {
-        console.error("Failed to start Telegram bot:", error.message);
-        process.exit(1);
-    });
-
-async function shutdown(signal) {
-    console.log(`${signal} received. Shutting down...`);
-
-    bot.stop(signal);
-
-    server.close(() => {
-        process.exit(0);
-    });
-
-    setTimeout(() => process.exit(1), 10000).unref();
+    console.log(`Monitoring channel: ${CHANNEL}`);
 }
 
-process.once("SIGINT", () => shutdown("SIGINT"));
-process.once("SIGTERM", () => shutdown("SIGTERM"));
+main().catch(console.error);
