@@ -8,8 +8,8 @@
 //  Both paths share one handler and one de-dupe set, so a code is never sent twice.
 //
 // Speed design:
-//  - The bot's InputPeer / InputUser are resolved once at startup, not per message
-//  - The code is pulled out with precompiled regexes and StartBot is fired immediately
+//  - The bot's InputPeer is resolved once at startup, not per message
+//  - The code is pulled out with precompiled regexes and the text is sent immediately
 //  - Library logging is off unless DEBUG=1, and Express runs with every extra switched off
 
 process.env.NODE_ENV = process.env.NODE_ENV || "production"; // lets Express skip dev-only work
@@ -18,7 +18,6 @@ const fs = require("fs");
 const { TelegramClient, Api } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { Raw } = require("telegram/events");
-const { generateRandomBigInt } = require("telegram/Helpers");
 
 const apiId = 38564953;
 const apiHash = "55caa3ce808da805b803bf6661f457b3";
@@ -30,7 +29,10 @@ const TARGET_BOT = "klyxx_bot";
 const TEST_CHANNEL = "testerx2026";
 const TEST_REPLY = "Bot is working";
 
-const POLL_MS = 2000; // safety-net poll of the main channel; 0 turns it off
+// Text sent right after a code, so the bot is ready for the next one.
+const FOLLOW_UP = "🎟 Enter promo";
+
+const POLL_MS = 1000; // safety-net poll of the main channel; 0 turns it off
 const MAX_EDIT_AGE_S = 300; // edits of posts older than this are ignored
 
 const SESSION_FILE = "telegram-session.txt";
@@ -150,7 +152,6 @@ async function main() {
   await client.getDialogs({ limit: 100 }); // warms the cache so channel updates arrive
 
   const botPeer = await client.getInputEntity(TARGET_BOT);
-  const botUser = new Api.InputUser({ userId: botPeer.userId, accessHash: botPeer.accessHash });
 
   let testChannel = null;
   let testChannelId = null;
@@ -178,24 +179,19 @@ async function main() {
       }
       return;
     }
+    const updatedCode = code?.startsWith('promo') ? code.split("promo_")[1] : code;
 
     remember(seen, msg.id);
     const t0 = Date.now();
     client
-      .invoke(
-        new Api.messages.StartBot({
-          bot: botUser,
-          peer: botPeer,
-          randomId: generateRandomBigInt(),
-          startParam: code,
-        })
-      )
+      .sendMessage(botPeer, { message: updatedCode })
+      .then(() => client.sendMessage(botPeer, { message: FOLLOW_UP }))
       .then(() =>
         console.log(
-          `Started @${TARGET_BOT} with parameter: ${code} (post ${msg.id}, ${via}, ${Date.now() - t0}ms)`
+          `Sent code to @${TARGET_BOT}: ${code} + "${FOLLOW_UP}" (post ${msg.id}, ${via}, ${Date.now() - t0}ms)`
         )
       )
-      .catch((err) => console.error("StartBot failed:", err.message));
+      .catch((err) => console.error("Sending code failed:", err.message));
   };
 
   const onUpdate = (update) => {
